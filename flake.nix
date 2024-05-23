@@ -1,7 +1,7 @@
 {
   description = "Application packaged using poetry2nix";
 
-    nixConfig = {
+  nixConfig = {
     extra-substituters = [
       "https://ros.cachix.org"
       "https://nix-community.cachix.org"
@@ -14,57 +14,59 @@
     ];
   };
 
-
   inputs = {
-    flake-utils.url = "github:numtide/flake-utils";
+    flake-parts.url = "github:hercules-ci/flake-parts";
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable-small";
     poetry2nix = {
       url = "github:nix-community/poetry2nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    devenv = {
-      url = "github:cachix/devenv/latest";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
+    devshell.url = "github:numtide/devshell";
   };
 
-  outputs = { self, nixpkgs, flake-utils, poetry2nix, devenv }@inputs:
-    flake-utils.lib.eachDefaultSystem (system:
-      let
-        # see https://github.com/nix-community/poetry2nix/tree/master#api for more functions and examples.
-        pkgs = nixpkgs.legacyPackages.${system};
-        inherit (poetry2nix.lib.mkPoetry2Nix { inherit pkgs; }) mkPoetryApplication;
-        inherit (poetry2nix.lib.mkPoetry2Nix { inherit pkgs; }) mkPoetryEnv;
-        # inherit (poetry2nix.legacyPackages.${system}) mkPoetryEnv;
-        app = mkPoetryEnv { projectDir = self; };
-      in
-      {
-        packages = {
-          myapp = mkPoetryApplication { projectDir = self; };
-          default = self.packages.${system}.myapp;
+  outputs = { self, nixpkgs, flake-parts, poetry2nix, devshell }@inputs:
+    flake-parts.lib.mkFlake { inherit inputs; } {
+      imports = [ devshell.flakeModule ];
+
+      systems = [ "x86_64-linux" "aarch64-darwin" ];
+
+      perSystem = { pkgs, system, ... }:
+        let
+          pkgs = import nixpkgs {
+            inherit system;
+            overlays = [ inputs.poetry2nix.overlays.default ];
+          };
+          overrides = pkgs.poetry2nix.overrides.withDefaults (final: prev: {
+            myapp = prev.myapp.overridePythonAttrs (old: {
+              nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ prev.pytestCheckHook ];
+            });
+          });
+          app = pkgs.poetry2nix.mkPoetryEnv {
+            projectDir = self;
+            inherit overrides;
+          };
+        in
+        {
+          packages = rec {
+            myapp = pkgs.poetry2nix.mkPoetryApplication {
+              projectDir = self;
+              pythonImportsCheck = [ "app" ];
+              inherit overrides;
+            };
+            default = myapp;
+          };
+          devshells.default = {
+            packages = [
+              app
+              pkgs.poetry
+            ];
+            # env = [
+            #   {
+            #     name = "PYTHONHOME";
+            #     value = app;
+            #   }
+            # ];
+          };
         };
-
-        devShells.default = devenv.lib.mkShell {
-          inherit inputs pkgs;
-          modules = [
-            {
-              packages = [
-                # poetry2nix.packages.${system}.poetry
-                # pkgs.python310
-                app
-                pkgs.poetry
-              ];
-              env = {
-                PROJECT = "tfm";
-
-                # context for taskwarrior
-                TW_CONTEXT = "tfm";
-
-                # PYTHON = lib.getExe app;
-                PYTHONHOME = app;
-              };
-            }
-          ];
-        };
-      });
+    };
 }
