@@ -60,12 +60,20 @@
               app
               pkgs.poetry
             ];
-            # env = [
-            #   {
-            #     name = "PYTHONHOME";
-            #     value = app;
-            #   }
-            # ];
+            env = [
+              {
+                name = "VSCODE_PYTHON_INTERPRETER";
+                eval = "$(ln -sf ${app}/bin/python /tmp/vscode-python; echo '/tmp/vscode-python')";
+              }
+              {
+                name = "PYTHONHOME";
+                value = app;
+              }
+              {
+                name = "PYTHONPATH";
+                value = app;
+              }
+            ];
           };
         };
     };
